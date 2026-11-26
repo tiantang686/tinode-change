@@ -1,0 +1,12 @@
+node_modules/
+pg/
+pg17/
+pgdata/
+server/*
+!server/tinode.conf.example
+*.exe
+*.log
+*.zip
+*.tgz
+.env
+.env.local

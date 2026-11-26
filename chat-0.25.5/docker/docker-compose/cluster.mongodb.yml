@@ -1,0 +1,55 @@
+x-mongodb-tinode-env-vars: &mongodb-tinode-env-vars
+  "STORE_USE_ADAPTER": "mongodb"
+
+services:
+  db:
+    # Existing data requires sequential major upgrades; see README.md.
+    image: mongo:8.0.38
+    container_name: mongodb
+    entrypoint: ["/usr/bin/mongod", "--bind_ip_all", "--replSet", "rs0"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping: 1}).ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Idempotently initialize a fresh replica set and wait for a writable primary.
+  initdb:
+    image: mongo:8.0.38
+    container_name: initdb
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["mongosh", "--host", "mongodb:27017", "--quiet", "--eval"]
+    command:
+      - >-
+        try { rs.status(); }
+        catch (e) {
+          if (e.code !== 94) { throw e; }
+          rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongodb:27017"}]});
+        }
+        let ready = false;
+        for (let i = 0; i < 60; i++) {
+          if (db.hello().isWritablePrimary) { ready = true; break; }
+          sleep(1000);
+        }
+        if (!ready) { throw new Error("Replica set primary was not elected"); }
+
+  tinode-0:
+    depends_on:
+      db:
+        condition: service_healthy
+      initdb:
+        condition: service_completed_successfully
+    environment:
+      << : *mongodb-tinode-env-vars
+      "WAIT_FOR": "mongodb:27017"
+
+  tinode-1:
+    environment:
+      << : *mongodb-tinode-env-vars
+
+  tinode-2:
+    environment:
+      << : *mongodb-tinode-env-vars
